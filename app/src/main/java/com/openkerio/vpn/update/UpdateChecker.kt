@@ -56,7 +56,6 @@ object UpdateChecker {
                 val htmlUrl = json.optString("html_url").ifBlank {
                     "https://github.com/$repo/releases/tag/$tag"
                 }
-                // Only allow github.com release pages for this repo.
                 if (!htmlUrl.startsWith("https://github.com/$repo/")) {
                     return UpdateCheckResult.Error("Unexpected release URL")
                 }
@@ -68,8 +67,16 @@ object UpdateChecker {
                     body = json.optString("body").orEmpty(),
                 )
                 settings.lastUpdateCheckAt = System.currentTimeMillis()
-                if (info.versionCode <= BuildConfig.VERSION_CODE &&
-                    !isNewerName(info.versionName, BuildConfig.VERSION_NAME)
+
+                // Compare by version name first so tags like v1.3.1 are not treated as
+                // "newer" just because parseVersionCode encodes 10301 > local versionCode.
+                if (!isNewerName(info.versionName, BuildConfig.VERSION_NAME)) {
+                    return UpdateCheckResult.UpToDate
+                }
+                // Extra guard: explicit build code in tag (v1.4.0+9) vs VERSION_CODE.
+                if (info.versionCode > 0 &&
+                    tag.contains('+') &&
+                    info.versionCode <= BuildConfig.VERSION_CODE
                 ) {
                     return UpdateCheckResult.UpToDate
                 }
@@ -94,11 +101,9 @@ object UpdateChecker {
     }
 
     private fun parseVersionCode(tag: String): Int {
-        // Prefer trailing integer: v1.2.3+5 or build 5
         Regex("""(?:\+|build[= ]?)(\d+)$""", RegexOption.IGNORE_CASE).find(tag)?.groupValues?.get(1)
             ?.toIntOrNull()?.let { return it }
         val parts = tag.trim().removePrefix("v").split('.', '-', '+')
-        // Encode 1.2.3 -> 10203 style if no explicit code.
         val nums = parts.mapNotNull { it.filter { ch -> ch.isDigit() }.toIntOrNull() }
         if (nums.isEmpty()) return 0
         return when (nums.size) {

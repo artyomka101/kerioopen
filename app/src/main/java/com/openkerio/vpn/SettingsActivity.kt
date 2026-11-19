@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.CheckBox
 import android.widget.ImageButton
@@ -12,16 +14,14 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.textfield.TextInputEditText
 import com.openkerio.vpn.data.AppLanguage
 import com.openkerio.vpn.data.AppSettings
 import com.openkerio.vpn.data.CipherPreference
-import com.openkerio.vpn.data.SessionLog
 import com.openkerio.vpn.data.ThemeMode
 import com.openkerio.vpn.update.UpdateCheckResult
 import com.openkerio.vpn.update.UpdateChecker
+import com.openkerio.vpn.vpn.KerioVpnService
 import kotlin.concurrent.thread
 
 class SettingsActivity : AppCompatActivity() {
@@ -29,13 +29,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var themeSpinner: Spinner
     private lateinit var languageSpinner: Spinner
     private lateinit var cipherSpinner: Spinner
-    private lateinit var repoInput: TextInputEditText
     private lateinit var autoUpdateCheck: CheckBox
     private lateinit var updateStatusText: TextView
-    private lateinit var logPreview: TextView
     private lateinit var aboutText: TextView
     private var suppressPersist = false
-    private var pendingLanguageRecreate = false
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(AppSettings.wrapContext(newBase))
@@ -49,16 +46,11 @@ class SettingsActivity : AppCompatActivity() {
         themeSpinner = findViewById(R.id.themeSpinner)
         languageSpinner = findViewById(R.id.languageSpinner)
         cipherSpinner = findViewById(R.id.cipherSpinner)
-        repoInput = findViewById(R.id.repoInput)
         autoUpdateCheck = findViewById(R.id.autoUpdateCheck)
         updateStatusText = findViewById(R.id.updateStatusText)
-        logPreview = findViewById(R.id.logPreview)
         aboutText = findViewById(R.id.aboutText)
 
-        findViewById<ImageButton>(R.id.backButton).setOnClickListener {
-            persistFields(allowRecreate = false)
-            finish()
-        }
+        findViewById<ImageButton>(R.id.backButton).setOnClickListener { finish() }
 
         suppressPersist = true
         themeSpinner.adapter = ArrayAdapter(
@@ -95,58 +87,46 @@ class SettingsActivity : AppCompatActivity() {
             settings.cipherPreference.ordinal.coerceIn(0, CipherPreference.entries.lastIndex),
             false,
         )
-        repoInput.setText(settings.updateRepo)
         autoUpdateCheck.isChecked = settings.autoCheckUpdates
         suppressPersist = false
 
-        aboutText.text = getString(
-            R.string.settings_about_format,
-            BuildConfig.VERSION_NAME,
-            BuildConfig.VERSION_CODE,
-        )
-        refreshLogPreview()
+        aboutText.text = getString(R.string.settings_version_format, BuildConfig.VERSION_NAME)
 
-        findViewById<MaterialButton>(R.id.checkUpdateButton).setOnClickListener {
-            persistFields(allowRecreate = false)
-            checkUpdates(manual = true)
+        val applyListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                applySettingsLive()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
-        findViewById<MaterialButton>(R.id.exportLogButton).setOnClickListener {
-            runCatching {
-                startActivity(
-                    Intent.createChooser(
-                        SessionLog.exportShareIntent(this),
-                        getString(R.string.settings_export_log),
-                    ),
-                )
-            }.onFailure {
-                Toast.makeText(this, it.message ?: "export failed", Toast.LENGTH_SHORT).show()
+        themeSpinner.onItemSelectedListener = applyListener
+        languageSpinner.onItemSelectedListener = applyListener
+        cipherSpinner.onItemSelectedListener = applyListener
+        autoUpdateCheck.setOnCheckedChangeListener { _, _ ->
+            if (!suppressPersist) {
+                settings.autoCheckUpdates = autoUpdateCheck.isChecked
             }
         }
-        findViewById<MaterialButton>(R.id.clearLogButton).setOnClickListener {
-            SessionLog.clear()
-            refreshLogPreview()
+
+        findViewById<MaterialButton>(R.id.checkUpdateButton).setOnClickListener {
+            checkUpdates(manual = true)
+        }
+        findViewById<MaterialButton>(R.id.openLogButton).setOnClickListener {
+            SessionLogActivity.start(this)
         }
     }
 
     override fun onPause() {
-        persistFields(allowRecreate = false)
+        applySettingsLive(showToasts = false)
         super.onPause()
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (pendingLanguageRecreate) {
-            pendingLanguageRecreate = false
-            ViewCompat.postOnAnimation(window.decorView) {
-                if (!isFinishing && !isDestroyed) recreate()
-            }
-        }
-    }
-
-    private fun persistFields(allowRecreate: Boolean) {
+    private fun applySettingsLive(showToasts: Boolean = true) {
         if (suppressPersist || !::settings.isInitialized || !::themeSpinner.isInitialized) return
         val oldLang = settings.language
         val oldTheme = settings.themeMode
+        val oldCipher = settings.cipherPreference
+
         settings.themeMode = ThemeMode.entries.getOrElse(themeSpinner.selectedItemPosition) { ThemeMode.SYSTEM }
         settings.language = AppLanguage.entries.getOrElse(languageSpinner.selectedItemPosition) {
             AppLanguage.SYSTEM
@@ -154,29 +134,33 @@ class SettingsActivity : AppCompatActivity() {
         settings.cipherPreference = CipherPreference.entries.getOrElse(
             cipherSpinner.selectedItemPosition,
         ) { CipherPreference.AUTO }
-        settings.updateRepo = repoInput.text?.toString().orEmpty().trim().ifBlank {
-            AppSettings.DEFAULT_UPDATE_REPO
-        }
         settings.autoCheckUpdates = autoUpdateCheck.isChecked
+
         if (settings.themeMode != oldTheme) {
             settings.applyTheme()
+            // AppCompat recreates activities for night mode — no process restart needed.
         }
+
         if (settings.language != oldLang) {
             AppSettings.notifyLocaleChanged()
-            if (allowRecreate) {
-                recreate()
-            } else {
-                pendingLanguageRecreate = true
+            if (showToasts) {
+                Toast.makeText(this, R.string.settings_restart_language, Toast.LENGTH_SHORT).show()
             }
+            recreate()
+            return
         }
-    }
 
-    private fun refreshLogPreview() {
-        val snap = SessionLog.snapshot().takeLast(12)
-        logPreview.text = if (snap.isEmpty()) {
-            getString(R.string.settings_log_empty)
-        } else {
-            snap.joinToString("\n")
+        if (settings.cipherPreference != oldCipher) {
+            val vpnActive = KerioVpnService.lastStatus == KerioVpnService.STATUS_CONNECTED ||
+                KerioVpnService.lastStatus == KerioVpnService.STATUS_CONNECTING ||
+                KerioVpnService.lastStatus == KerioVpnService.STATUS_RECONNECTING
+            if (showToasts) {
+                Toast.makeText(
+                    this,
+                    if (vpnActive) R.string.settings_cipher_reconnect else R.string.settings_cipher_saved,
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
         }
     }
 

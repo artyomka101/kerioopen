@@ -109,25 +109,11 @@
             android:textColor="@color/ok_muted"
             android:textSize="12sp" />
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:hint="@string/settings_github_repo">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/repoInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="textUri"
-                android:singleLine="true" />
-        </com.google.android.material.textfield.TextInputLayout>
-
         <CheckBox
             android:id="@+id/autoUpdateCheck"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="8dp"
             android:text="@string/settings_auto_updates"
             android:textColor="@color/ok_ink" />
 
@@ -158,39 +144,21 @@
             android:textSize="12sp" />
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/exportLogButton"
+            android:id="@+id/openLogButton"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="@string/settings_export_log"
+            android:text="@string/settings_open_log"
             android:textAllCaps="false"
             app:strokeColor="@color/ok_accent" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/clearLogButton"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/settings_clear_log"
-            android:textAllCaps="false" />
-
-        <TextView
-            android:id="@+id/logPreview"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:fontFamily="monospace"
-            android:maxLines="12"
-            android:scrollbars="vertical"
-            android:textColor="@color/ok_muted"
-            android:textSize="11sp" />
 
         <TextView
             android:id="@+id/aboutText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="28dp"
+            android:gravity="center_horizontal"
             android:textColor="@color/ok_muted"
             android:textSize="12sp" />
     </LinearLayout>

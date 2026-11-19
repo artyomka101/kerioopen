@@ -22,7 +22,9 @@
     <string name="persistent">Постоянное соединение</string>
     <string name="cert_none">Сертификат не проверен</string>
     <string name="cert_ok">Сертификат OK</string>
+    <string name="ok">OK</string>
     <string name="check_cert">Проверить сертификат</string>
+    <string name="cert_trust_message">SHA-256:\n%1$s\n\nДоверять этому сертификату?</string>
     <string name="connect">Подключить</string>
     <string name="disconnect">Отключить</string>
     <string name="speed_down_zero">↓ 0 Кбит/с</string>
@@ -46,10 +48,15 @@
     <string name="settings_auto_updates">Проверять обновления автоматически</string>
     <string name="settings_check_update">Проверить обновление</string>
     <string name="settings_logs">Лог сессии</string>
+    <string name="settings_open_log">Открыть лог</string>
     <string name="settings_export_log">Экспорт лога</string>
     <string name="settings_clear_log">Очистить лог</string>
     <string name="settings_log_empty">Лог пуст</string>
     <string name="settings_about_format">OpenKerio %1$s (%2$d)\nKerio Control OpenControl · AES + legacy Blowfish</string>
+    <string name="settings_version_format">Версия %1$s</string>
+    <string name="settings_restart_language">Язык применён</string>
+    <string name="settings_cipher_saved">Протокол сохранён</string>
+    <string name="settings_cipher_reconnect">Протокол применится после переподключения</string>
     <string name="theme_system">Системная</string>
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Тёмная</string>

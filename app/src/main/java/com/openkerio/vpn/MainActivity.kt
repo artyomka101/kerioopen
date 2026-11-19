@@ -300,8 +300,8 @@ class MainActivity : AppCompatActivity() {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     AlertDialog.Builder(this)
                         .setTitle(R.string.check_cert)
-                        .setMessage("SHA-256:\n$fp")
-                        .setPositiveButton(R.string.cert_ok) { _, _ ->
+                        .setMessage(getString(R.string.cert_trust_message, fp))
+                        .setPositiveButton(R.string.ok) { _, _ ->
                             prefs.saveTrustedFingerprint(fp)
                             fingerprintText.text = getString(R.string.cert_ok)
                             persistForm(fingerprintOverride = fp)
@@ -394,12 +394,16 @@ class MainActivity : AppCompatActivity() {
         if (connected) {
             rxSpeedText.text = "↓ ${formatRate(rxBps)}"
             txSpeedText.text = "↑ ${formatRate(txBps)}"
-            connectedAtMs = if (connectedAt > 0L) connectedAt else connectedAtMs
+            // Always trust service uptime so reconnects reset the timer.
+            connectedAtMs = connectedAt
             if (connectedAtMs > 0L) {
                 uptimeText.visibility = View.VISIBLE
                 uptimeText.text = getString(R.string.uptime_format, formatUptime(connectedAtMs))
                 uiHandler.removeCallbacks(uptimeTicker)
                 uiHandler.postDelayed(uptimeTicker, 1_000L)
+            } else {
+                uptimeText.visibility = View.GONE
+                uiHandler.removeCallbacks(uptimeTicker)
             }
         } else {
             connectedAtMs = 0L

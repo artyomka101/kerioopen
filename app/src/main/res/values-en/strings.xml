@@ -22,7 +22,9 @@
     <string name="persistent">Keep connected</string>
     <string name="cert_none">Certificate not verified</string>
     <string name="cert_ok">Certificate OK</string>
+    <string name="ok">OK</string>
     <string name="check_cert">Verify certificate</string>
+    <string name="cert_trust_message">SHA-256:\n%1$s\n\nTrust this certificate?</string>
     <string name="connect">Connect</string>
     <string name="disconnect">Disconnect</string>
     <string name="speed_down_zero">↓ 0 Kbps</string>
@@ -46,10 +48,15 @@
     <string name="settings_auto_updates">Check for updates automatically</string>
     <string name="settings_check_update">Check for update</string>
     <string name="settings_logs">Session log</string>
+    <string name="settings_open_log">Open log</string>
     <string name="settings_export_log">Export log</string>
     <string name="settings_clear_log">Clear log</string>
     <string name="settings_log_empty">Log is empty</string>
     <string name="settings_about_format">OpenKerio %1$s (%2$d)\nKerio Control OpenControl · AES + legacy Blowfish</string>
+    <string name="settings_version_format">Version %1$s</string>
+    <string name="settings_restart_language">Language applied</string>
+    <string name="settings_cipher_saved">Cipher saved</string>
+    <string name="settings_cipher_reconnect">Cipher applies after reconnect</string>
     <string name="theme_system">System</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>

@@ -51,8 +51,9 @@ class KerioVpnService : VpnService() {
         Log.i(TAG, "underlying network changed — reconnecting")
         SessionLog.w("network change → reconnect")
         networkReconnect.set(true)
+        resetUptime()
         publishStatus(STATUS_RECONNECTING, getString(R.string.status_network_switch))
-        updateNotification(getString(R.string.status_reconnecting))
+        updateStatusNotification(STATUS_RECONNECTING, getString(R.string.status_network_switch))
         runCatching { NativeEngine.stop() }
     }
 
@@ -127,6 +128,7 @@ class KerioVpnService : VpnService() {
                 val cipherPref = AppSettings(this@KerioVpnService).cipherPreference
                 SessionLog.i("connecting host=$host:$port cipherPref=$cipherPref")
                 publishStatus(STATUS_CONNECTING, host)
+                updateStatusNotification(STATUS_CONNECTING, host)
                 NativeEngine.start(
                     host = host,
                     port = port,
@@ -151,10 +153,15 @@ class KerioVpnService : VpnService() {
                                         connectedAtMs = System.currentTimeMillis()
                                     }
                                 }
-                                STATUS_RECONNECTING -> connectedAtMs = 0L
-                                else -> if (status != STATUS_CONNECTING) connectedAtMs = 0L
+                                STATUS_RECONNECTING -> resetUptime()
+                                STATUS_CONNECTING -> {
+                                    // Keep uptime only across brief CONNECTING after first connect;
+                                    // network/engine reconnect paths zero it explicitly.
+                                }
+                                else -> resetUptime()
                             }
                             publishStatus(status, detail)
+                            updateStatusNotification(status, detail)
                             if (status == STATUS_CONNECTED) {
                                 if (!profileSaved) {
                                     profileSaved = true
@@ -162,9 +169,6 @@ class KerioVpnService : VpnService() {
                                         ConnectionPrefs(this@KerioVpnService).upsertProfile(config)
                                     }
                                 }
-                                refreshConnectedNotification()
-                            } else if (status == STATUS_ERROR) {
-                                updateNotification(detail)
                             }
                         }
 
@@ -181,8 +185,10 @@ class KerioVpnService : VpnService() {
 
                         override fun onTraffic(rxBps: Long, txBps: Long) {
                             publishTraffic(rxBps, txBps)
-                            if (lastStatus == STATUS_CONNECTED) {
-                                refreshConnectedNotification()
+                            if (lastStatus == STATUS_CONNECTED || lastStatus == STATUS_CONNECTING ||
+                                lastStatus == STATUS_RECONNECTING
+                            ) {
+                                updateStatusNotification(lastStatus, lastDetail)
                             }
                         }
 
@@ -217,8 +223,9 @@ class KerioVpnService : VpnService() {
                         transient -> friendlyNetworkError(failure)
                         else -> failure?.message.orEmpty()
                     }
+                    resetUptime()
                     publishStatus(STATUS_RECONNECTING, detail)
-                    updateNotification(getString(R.string.status_reconnecting))
+                    updateStatusNotification(STATUS_RECONNECTING, detail)
                     Log.i(TAG, "reconnect attempt=$attempt delay=${delayMs}ms")
                     try {
                         Thread.sleep(delayMs)
@@ -599,11 +606,26 @@ class KerioVpnService : VpnService() {
         nm.createNotificationChannel(channel)
     }
 
-    private fun refreshConnectedNotification() {
-        val uptime = formatUptime(connectedAtMs)
-        val rx = formatRate(lastRxBps)
-        val tx = formatRate(lastTxBps)
-        updateNotification(getString(R.string.vpn_notification_status, uptime, rx, tx))
+    private fun resetUptime() {
+        connectedAtMs = 0L
+    }
+
+    private fun updateStatusNotification(status: String, detail: String) {
+        val text = when (status) {
+            STATUS_CONNECTED -> {
+                val uptime = formatUptime(connectedAtMs)
+                val rx = formatRate(lastRxBps)
+                val tx = formatRate(lastTxBps)
+                getString(R.string.vpn_notification_status, uptime, rx, tx)
+            }
+            STATUS_CONNECTING -> getString(R.string.vpn_notification_connecting) +
+                if (detail.isNotBlank()) " · $detail" else ""
+            STATUS_RECONNECTING -> getString(R.string.status_reconnecting) +
+                if (detail.isNotBlank()) " · $detail" else ""
+            STATUS_ERROR -> detail.ifBlank { getString(R.string.status_error) }
+            else -> getString(R.string.status_disconnected)
+        }
+        updateNotification(text)
     }
 
     private fun formatUptime(connectedAt: Long): String {
@@ -627,12 +649,16 @@ class KerioVpnService : VpnService() {
     private fun publishStatus(status: String, detail: String) {
         lastStatus = status
         lastDetail = detail
+        if (status == STATUS_RECONNECTING) {
+            resetUptime()
+        }
         if (status != STATUS_CONNECTED) {
             lastRxBps = 0
             lastTxBps = 0
             if (status == STATUS_DISCONNECTED || status == STATUS_ERROR) {
                 lastWireVersion = 0
                 lastCipher = ""
+                resetUptime()
             }
         }
         sendBroadcast(
