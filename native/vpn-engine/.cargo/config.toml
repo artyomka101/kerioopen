@@ -1,0 +1,3 @@
+# Linkers are injected by scripts/build-native.ps1 via environment variables.
+[build]
+# Default host target; Android targets set explicitly on the cargo command line.

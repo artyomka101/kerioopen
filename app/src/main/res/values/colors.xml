@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ok_bg_top">#E8F1F4</color>
+    <color name="ok_bg_bottom">#F7FAFB</color>
+    <color name="ok_ink">#0F2A32</color>
+    <color name="ok_muted">#5A737A</color>
+    <color name="ok_accent">#0D7377</color>
+    <color name="ok_accent_dark">#095456</color>
+    <color name="ok_surface">#FFFFFF</color>
+    <color name="ok_stroke">#D5E2E5</color>
+    <color name="ok_danger">#B42318</color>
+    <color name="ok_chip_bg">#DCEEEF</color>
+    <color name="ok_chip_text">#0D7377</color>
+    <color name="ok_speed_bg">#F0F7F8</color>
+</resources>
