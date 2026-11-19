@@ -12,6 +12,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
 import com.openkerio.vpn.data.AppLanguage
@@ -33,15 +34,16 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var updateStatusText: TextView
     private lateinit var logPreview: TextView
     private lateinit var aboutText: TextView
+    private var suppressPersist = false
+    private var pendingLanguageRecreate = false
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(AppSettings.wrapContext(newBase))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        settings = AppSettings(this)
-        settings.applyTheme()
         super.onCreate(savedInstanceState)
+        settings = AppSettings(this)
         setContentView(R.layout.activity_settings)
 
         themeSpinner = findViewById(R.id.themeSpinner)
@@ -53,8 +55,12 @@ class SettingsActivity : AppCompatActivity() {
         logPreview = findViewById(R.id.logPreview)
         aboutText = findViewById(R.id.aboutText)
 
-        findViewById<ImageButton>(R.id.backButton).setOnClickListener { finish() }
+        findViewById<ImageButton>(R.id.backButton).setOnClickListener {
+            persistFields(allowRecreate = false)
+            finish()
+        }
 
+        suppressPersist = true
         themeSpinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
@@ -83,11 +89,15 @@ class SettingsActivity : AppCompatActivity() {
             ),
         )
 
-        themeSpinner.setSelection(settings.themeMode.ordinal)
-        languageSpinner.setSelection(settings.language.ordinal)
-        cipherSpinner.setSelection(settings.cipherPreference.ordinal)
+        themeSpinner.setSelection(settings.themeMode.ordinal.coerceIn(0, ThemeMode.entries.lastIndex), false)
+        languageSpinner.setSelection(settings.language.ordinal.coerceIn(0, AppLanguage.entries.lastIndex), false)
+        cipherSpinner.setSelection(
+            settings.cipherPreference.ordinal.coerceIn(0, CipherPreference.entries.lastIndex),
+            false,
+        )
         repoInput.setText(settings.updateRepo)
         autoUpdateCheck.isChecked = settings.autoCheckUpdates
+        suppressPersist = false
 
         aboutText.text = getString(
             R.string.settings_about_format,
@@ -97,12 +107,17 @@ class SettingsActivity : AppCompatActivity() {
         refreshLogPreview()
 
         findViewById<MaterialButton>(R.id.checkUpdateButton).setOnClickListener {
-            persistFields()
+            persistFields(allowRecreate = false)
             checkUpdates(manual = true)
         }
         findViewById<MaterialButton>(R.id.exportLogButton).setOnClickListener {
             runCatching {
-                startActivity(Intent.createChooser(SessionLog.exportShareIntent(this), getString(R.string.settings_export_log)))
+                startActivity(
+                    Intent.createChooser(
+                        SessionLog.exportShareIntent(this),
+                        getString(R.string.settings_export_log),
+                    ),
+                )
             }.onFailure {
                 Toast.makeText(this, it.message ?: "export failed", Toast.LENGTH_SHORT).show()
             }
@@ -114,29 +129,55 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        persistFields()
+        persistFields(allowRecreate = false)
         super.onPause()
     }
 
-    private fun persistFields() {
+    override fun onResume() {
+        super.onResume()
+        if (pendingLanguageRecreate) {
+            pendingLanguageRecreate = false
+            ViewCompat.postOnAnimation(window.decorView) {
+                if (!isFinishing && !isDestroyed) recreate()
+            }
+        }
+    }
+
+    private fun persistFields(allowRecreate: Boolean) {
+        if (suppressPersist || !::settings.isInitialized || !::themeSpinner.isInitialized) return
         val oldLang = settings.language
         val oldTheme = settings.themeMode
-        settings.themeMode = ThemeMode.entries[themeSpinner.selectedItemPosition]
-        settings.language = AppLanguage.entries[languageSpinner.selectedItemPosition]
-        settings.cipherPreference = CipherPreference.entries[cipherSpinner.selectedItemPosition]
-        settings.updateRepo = repoInput.text?.toString().orEmpty().trim()
+        settings.themeMode = ThemeMode.entries.getOrElse(themeSpinner.selectedItemPosition) { ThemeMode.SYSTEM }
+        settings.language = AppLanguage.entries.getOrElse(languageSpinner.selectedItemPosition) {
+            AppLanguage.SYSTEM
+        }
+        settings.cipherPreference = CipherPreference.entries.getOrElse(
+            cipherSpinner.selectedItemPosition,
+        ) { CipherPreference.AUTO }
+        settings.updateRepo = repoInput.text?.toString().orEmpty().trim().ifBlank {
+            AppSettings.DEFAULT_UPDATE_REPO
+        }
         settings.autoCheckUpdates = autoUpdateCheck.isChecked
         if (settings.themeMode != oldTheme) {
             settings.applyTheme()
         }
         if (settings.language != oldLang) {
-            recreate()
+            AppSettings.notifyLocaleChanged()
+            if (allowRecreate) {
+                recreate()
+            } else {
+                pendingLanguageRecreate = true
+            }
         }
     }
 
     private fun refreshLogPreview() {
         val snap = SessionLog.snapshot().takeLast(12)
-        logPreview.text = if (snap.isEmpty()) getString(R.string.settings_log_empty) else snap.joinToString("\n")
+        logPreview.text = if (snap.isEmpty()) {
+            getString(R.string.settings_log_empty)
+        } else {
+            snap.joinToString("\n")
+        }
     }
 
     private fun checkUpdates(manual: Boolean) {
@@ -144,6 +185,7 @@ class SettingsActivity : AppCompatActivity() {
         thread(name = "update-check") {
             val result = UpdateChecker.check(settings, ignoreDismissed = manual)
             runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 when (result) {
                     is UpdateCheckResult.Available ->
                         showUpdateDialog(result.info.tag, result.info.htmlUrl, result.info.body)
@@ -171,7 +213,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun showUpdateDialog(tag: String, url: String, body: String) {
-        if (tag.isBlank() || url.isBlank()) return
+        if (isFinishing || isDestroyed || tag.isBlank() || url.isBlank()) return
         updateStatusText.text = getString(R.string.update_available, tag)
         AlertDialog.Builder(this)
             .setTitle(R.string.update_available_title)
@@ -180,7 +222,7 @@ class SettingsActivity : AppCompatActivity() {
                     if (body.isNotBlank()) "\n\n" + body.take(400) else "",
             )
             .setPositiveButton(R.string.update_open) { _, _ ->
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
             }
             .setNegativeButton(R.string.update_later) { _, _ ->
                 settings.dismissedUpdateTag = tag

@@ -38,7 +38,7 @@
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/settings"
                 android:src="@drawable/ic_settings"
-                app:tint="@color/ok_ink" />
+                android:tint="@color/ok_ink" />
         </LinearLayout>
 
         <TextView

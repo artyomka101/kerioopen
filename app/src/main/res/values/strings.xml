@@ -70,4 +70,7 @@
     <string name="update_open">Открыть</string>
     <string name="update_later">Позже</string>
     <string name="speed_graph_legend">↓ акцент · ↑ серый</string>
+    <string name="rate_mbps">%.1f Мбит/с</string>
+    <string name="rate_kbps">%.0f Кбит/с</string>
+    <string name="rate_bps">%.0f бит/с</string>
 </resources>

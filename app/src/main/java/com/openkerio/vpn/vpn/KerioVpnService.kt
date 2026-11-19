@@ -57,6 +57,8 @@ class KerioVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Must enter foreground immediately after startForegroundService — before any early return.
+        ensureForegroundStarted(getString(R.string.vpn_notification_connecting))
         when (intent?.action) {
             ACTION_DISCONNECT -> {
                 disconnectInternal(userRequested = true)
@@ -74,16 +76,33 @@ class KerioVpnService : VpnService() {
         return START_STICKY
     }
 
+    private fun ensureForegroundStarted(content: String) {
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification(content))
+        } catch (t: Throwable) {
+            Log.e(TAG, "startForeground failed", t)
+        }
+    }
+
     override fun onDestroy() {
         disconnectInternal(userRequested = true)
         super.onDestroy()
     }
 
     private fun connectInternal() {
-        if (!running.compareAndSet(false, true)) return
+        if (!running.compareAndSet(false, true)) {
+            ensureForegroundStarted(
+                if (lastStatus == STATUS_CONNECTED) {
+                    getString(R.string.vpn_notification_connected)
+                } else {
+                    getString(R.string.vpn_notification_connecting)
+                },
+            )
+            return
+        }
         stopping.set(false)
         networkReconnect.set(false)
-        startForeground(NOTIFICATION_ID, buildNotification(getString(R.string.vpn_notification_connecting)))
+        ensureForegroundStarted(getString(R.string.vpn_notification_connecting))
         registerNetworkWatch()
 
         val config = sessionConfig ?: ConnectionPrefs(this).load()
@@ -554,7 +573,7 @@ class KerioVpnService : VpnService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.vpn_notification_title))
             .setContentText(content)
             .setOngoing(true)

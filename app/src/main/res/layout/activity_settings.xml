@@ -25,7 +25,7 @@
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/back"
                 android:src="@drawable/ic_back"
-                app:tint="@color/ok_ink" />
+                android:tint="@color/ok_ink" />
 
             <TextView
                 android:layout_width="0dp"

@@ -48,8 +48,19 @@ class KotlinVpnEngine {
         cipherPreference: CipherPreference = CipherPreference.AUTO,
         callbacks: NativeEngine.TunCallbacks,
     ) {
-        if (!running.compareAndSet(false, true)) {
-            throw IllegalStateException("already running")
+        // Wait briefly if a previous session is still tearing down after stop().
+        val waitUntil = System.currentTimeMillis() + 3_000L
+        while (!running.compareAndSet(false, true)) {
+            if (System.currentTimeMillis() >= waitUntil) {
+                throw IllegalStateException("already running")
+            }
+            stop.set(true)
+            try {
+                Thread.sleep(50)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw IllegalStateException("cancelled")
+            }
         }
         stop.set(false)
         try {

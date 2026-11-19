@@ -2,6 +2,8 @@ package com.openkerio.vpn.data
 
 import android.content.Context
 import android.content.res.Configuration
+import android.os.Build
+import android.os.LocaleList
 import androidx.appcompat.app.AppCompatDelegate
 import java.util.Locale
 
@@ -12,7 +14,9 @@ enum class AppLanguage { SYSTEM, RU, EN }
 enum class CipherPreference { AUTO, AES, LEGACY }
 
 class AppSettings(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    // applicationContext is null during Application.attachBaseContext — fall back to base.
+    private val prefs = (context.applicationContext ?: context)
+        .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     var themeMode: ThemeMode
         get() = ThemeMode.entries.getOrElse(prefs.getInt(KEY_THEME, 0)) { ThemeMode.SYSTEM }
@@ -66,10 +70,10 @@ class AppSettings(context: Context) {
         AppCompatDelegate.setDefaultNightMode(mode)
     }
 
-    fun resolveLocale(base: Context): Locale? {
+    fun resolveLocale(): Locale? {
         return when (language) {
             AppLanguage.SYSTEM -> null
-            AppLanguage.RU -> Locale("ru")
+            AppLanguage.RU -> Locale.forLanguageTag("ru")
             AppLanguage.EN -> Locale.ENGLISH
         }
     }
@@ -87,12 +91,30 @@ class AppSettings(context: Context) {
         /** Default GitHub Releases source for in-app updates. */
         const val DEFAULT_UPDATE_REPO = "artyomka101/kerioopen"
 
+        /** Bumped when language changes so underlying activities can recreate. */
+        @Volatile
+        var localeEpoch: Int = 0
+            private set
+
+        fun notifyLocaleChanged() {
+            localeEpoch += 1
+        }
+
         fun wrapContext(base: Context): Context {
-            val settings = AppSettings(base)
-            val locale = settings.resolveLocale(base) ?: return base
-            val config = Configuration(base.resources.configuration)
-            config.setLocale(locale)
-            return base.createConfigurationContext(config)
+            return try {
+                val locale = AppSettings(base).resolveLocale() ?: return base
+                val config = Configuration(base.resources.configuration)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    config.setLocales(LocaleList(locale))
+                } else {
+                    @Suppress("DEPRECATION")
+                    config.locale = locale
+                }
+                config.setLocale(locale)
+                base.createConfigurationContext(config)
+            } catch (_: Throwable) {
+                base
+            }
         }
     }
 }

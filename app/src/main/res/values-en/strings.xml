@@ -70,4 +70,7 @@
     <string name="update_open">Open</string>
     <string name="update_later">Later</string>
     <string name="speed_graph_legend">↓ accent · ↑ gray</string>
+    <string name="rate_mbps">%.1f Mbps</string>
+    <string name="rate_kbps">%.0f Kbps</string>
+    <string name="rate_bps">%.0f bps</string>
 </resources>

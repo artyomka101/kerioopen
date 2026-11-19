@@ -54,7 +54,7 @@ data class SavedProfile(
  * Also stores a list of previously used connection profiles.
  */
 class ConnectionPrefs(context: Context) {
-    private val appContext = context.applicationContext
+    private val appContext = context.applicationContext ?: context
     private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun load(): ConnectionConfig {

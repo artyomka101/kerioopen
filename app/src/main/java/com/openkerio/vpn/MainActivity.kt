@@ -75,6 +75,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var probeButton: MaterialButton
 
     private var busy = false
+    private var localeEpochSeen = AppSettings.localeEpoch
     private lateinit var profilesAdapter: ProfilesAdapter
 
     private val vpnPermission = registerForActivityResult(
@@ -116,9 +117,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        settings = AppSettings(this)
-        settings.applyTheme()
         super.onCreate(savedInstanceState)
+        settings = AppSettings(this)
         setContentView(R.layout.activity_main)
         prefs = ConnectionPrefs(this)
         bindViews()
@@ -150,6 +150,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (localeEpochSeen != AppSettings.localeEpoch) {
+            localeEpochSeen = AppSettings.localeEpoch
+            recreate()
+            return
+        }
         lastWireVersion = KerioVpnService.lastWireVersion
         lastCipher = KerioVpnService.lastCipher
         renderStatus(
@@ -292,7 +297,7 @@ class MainActivity : AppCompatActivity() {
                 val fp = NativeEngine.probeCertificate(host, port).lowercase()
                 runOnUiThread {
                     busy = false
-                    if (isFinishing) return@runOnUiThread
+                    if (isFinishing || isDestroyed) return@runOnUiThread
                     AlertDialog.Builder(this)
                         .setTitle(R.string.check_cert)
                         .setMessage("SHA-256:\n$fp")
@@ -311,7 +316,7 @@ class MainActivity : AppCompatActivity() {
             } catch (t: Throwable) {
                 runOnUiThread {
                     busy = false
-                    if (isFinishing) return@runOnUiThread
+                    if (isFinishing || isDestroyed) return@runOnUiThread
                     errorText.text = t.message ?: getString(R.string.status_error)
                     SessionLog.e("cert probe failed: ${t.message}")
                     renderStatus(KerioVpnService.lastStatus, KerioVpnService.lastDetail)
@@ -434,9 +439,9 @@ class MainActivity : AppCompatActivity() {
     private fun formatRate(bps: Long): String {
         val bits = bps * 8.0
         return when {
-            bits >= 1_000_000 -> String.format("%.1f Мбит/с", bits / 1_000_000.0)
-            bits >= 1_000 -> String.format("%.0f Кбит/с", bits / 1_000.0)
-            else -> String.format("%.0f бит/с", bits)
+            bits >= 1_000_000 -> getString(R.string.rate_mbps, bits / 1_000_000.0)
+            bits >= 1_000 -> getString(R.string.rate_kbps, bits / 1_000.0)
+            else -> getString(R.string.rate_bps, bits)
         }
     }
 
@@ -456,7 +461,7 @@ class MainActivity : AppCompatActivity() {
         thread(name = "auto-update") {
             when (val result = UpdateChecker.check(settings, ignoreDismissed = false)) {
                 is UpdateCheckResult.Available -> runOnUiThread {
-                    if (isFinishing) return@runOnUiThread
+                    if (isFinishing || isDestroyed) return@runOnUiThread
                     AlertDialog.Builder(this)
                         .setTitle(R.string.update_available_title)
                         .setMessage(getString(R.string.update_available_message, result.info.tag))

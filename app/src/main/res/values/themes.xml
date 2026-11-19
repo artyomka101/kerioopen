@@ -12,7 +12,7 @@
     </style>
 
     <style name="Widget.OpenKerio.TextInput" parent="Widget.MaterialComponents.TextInputLayout.OutlinedBox">
-        <item name="boxStrokeColor">@color/ok_accent</item>
+        <item name="boxStrokeColor">@color/text_input_stroke</item>
         <item name="hintTextColor">@color/ok_muted</item>
     </style>
 </resources>

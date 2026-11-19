@@ -16,8 +16,13 @@ import java.util.concurrent.CopyOnWriteArrayList
 object SessionLog {
     private const val MAX = 500
     private val lines = CopyOnWriteArrayList<String>()
-    private val timeFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
-    private val fileFmt = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+    private val lock = Any()
+    private val timeFmt = ThreadLocal.withInitial {
+        SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    }
+    private val fileFmt = ThreadLocal.withInitial {
+        SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+    }
 
     fun clear() {
         lines.clear()
@@ -35,7 +40,8 @@ object SessionLog {
 
     fun exportShareIntent(context: Context): Intent {
         val dir = File(context.cacheDir, "logs").apply { mkdirs() }
-        val file = File(dir, "openkerio_${fileFmt.format(Date())}.log")
+        val stamp = synchronized(lock) { fileFmt.get()!!.format(Date()) }
+        val file = File(dir, "openkerio_${stamp}.log")
         file.writeText(asText().ifBlank { "(empty log)" })
         val uri: Uri = FileProvider.getUriForFile(
             context,
@@ -52,16 +58,16 @@ object SessionLog {
 
     private fun append(level: String, message: String) {
         val safe = redact(message)
-        val line = "${timeFmt.format(Date())} $level $safe"
+        val stamp = synchronized(lock) { timeFmt.get()!!.format(Date()) }
+        val line = "$stamp $level $safe"
         lines.add(line)
         while (lines.size > MAX) {
-            lines.removeAt(0)
+            runCatching { lines.removeAt(0) }
         }
     }
 
     private fun redact(message: String): String {
         var out = message
-        // Never leak password-looking fragments if somehow passed in.
         out = out.replace(Regex("(?i)password[=:].*"), "password=***")
         out = out.replace(Regex("(?i)secret[=:].*"), "secret=***")
         return out
