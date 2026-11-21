@@ -19,13 +19,13 @@ class AppSettings(context: Context) {
         .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     var themeMode: ThemeMode
-        get() = ThemeMode.entries.getOrElse(prefs.getInt(KEY_THEME, 0)) { ThemeMode.SYSTEM }
+        get() = ThemeMode.entries.getOrElse(prefs.getInt(KEY_THEME, ThemeMode.DARK.ordinal)) { ThemeMode.DARK }
         set(value) {
             prefs.edit().putInt(KEY_THEME, value.ordinal).apply()
         }
 
     var language: AppLanguage
-        get() = AppLanguage.entries.getOrElse(prefs.getInt(KEY_LANG, 0)) { AppLanguage.SYSTEM }
+        get() = AppLanguage.entries.getOrElse(prefs.getInt(KEY_LANG, AppLanguage.RU.ordinal)) { AppLanguage.RU }
         set(value) {
             prefs.edit().putInt(KEY_LANG, value.ordinal).apply()
         }
@@ -36,31 +36,6 @@ class AppSettings(context: Context) {
             prefs.edit().putInt(KEY_CIPHER, value.ordinal).apply()
         }
 
-    /** owner/repo for GitHub releases, e.g. "myorg/openkerio-android" */
-    var updateRepo: String
-        get() = prefs.getString(KEY_UPDATE_REPO, DEFAULT_UPDATE_REPO)?.trim().orEmpty()
-        set(value) {
-            prefs.edit().putString(KEY_UPDATE_REPO, value.trim()).apply()
-        }
-
-    var dismissedUpdateTag: String
-        get() = prefs.getString(KEY_DISMISSED_TAG, "") ?: ""
-        set(value) {
-            prefs.edit().putString(KEY_DISMISSED_TAG, value).apply()
-        }
-
-    var lastUpdateCheckAt: Long
-        get() = prefs.getLong(KEY_LAST_CHECK, 0L)
-        set(value) {
-            prefs.edit().putLong(KEY_LAST_CHECK, value).apply()
-        }
-
-    var autoCheckUpdates: Boolean
-        get() = prefs.getBoolean(KEY_AUTO_CHECK, true)
-        set(value) {
-            prefs.edit().putBoolean(KEY_AUTO_CHECK, value).apply()
-        }
-
     fun applyTheme() {
         val mode = when (themeMode) {
             ThemeMode.SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
@@ -68,6 +43,19 @@ class AppSettings(context: Context) {
             ThemeMode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
         }
         AppCompatDelegate.setDefaultNightMode(mode)
+    }
+
+    /** Restores settings defaults; does not touch connection profiles/servers. */
+    fun resetToDefaults() {
+        prefs.edit()
+            .putInt(KEY_THEME, ThemeMode.DARK.ordinal)
+            .putInt(KEY_LANG, AppLanguage.RU.ordinal)
+            .putInt(KEY_CIPHER, CipherPreference.AUTO.ordinal)
+            .commit()
+    }
+
+    fun clearAll() {
+        prefs.edit().clear().commit()
     }
 
     fun resolveLocale(): Locale? {
@@ -83,13 +71,6 @@ class AppSettings(context: Context) {
         private const val KEY_THEME = "theme"
         private const val KEY_LANG = "lang"
         private const val KEY_CIPHER = "cipher"
-        private const val KEY_UPDATE_REPO = "update_repo"
-        private const val KEY_DISMISSED_TAG = "dismissed_update_tag"
-        private const val KEY_LAST_CHECK = "last_update_check"
-        private const val KEY_AUTO_CHECK = "auto_check_updates"
-
-        /** Default GitHub Releases source for in-app updates. */
-        const val DEFAULT_UPDATE_REPO = "artyomka101/kerioopen"
 
         /** Bumped when language changes so underlying activities can recreate. */
         @Volatile

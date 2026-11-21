@@ -1,14 +1,14 @@
 package com.openkerio.vpn
 
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
-import android.widget.CheckBox
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
@@ -18,20 +18,18 @@ import com.google.android.material.button.MaterialButton
 import com.openkerio.vpn.data.AppLanguage
 import com.openkerio.vpn.data.AppSettings
 import com.openkerio.vpn.data.CipherPreference
+import com.openkerio.vpn.data.ConnectionPrefs
+import com.openkerio.vpn.data.SessionLog
 import com.openkerio.vpn.data.ThemeMode
-import com.openkerio.vpn.update.UpdateCheckResult
-import com.openkerio.vpn.update.UpdateChecker
 import com.openkerio.vpn.vpn.KerioVpnService
-import kotlin.concurrent.thread
 
 class SettingsActivity : AppCompatActivity() {
     private lateinit var settings: AppSettings
     private lateinit var themeSpinner: Spinner
     private lateinit var languageSpinner: Spinner
     private lateinit var cipherSpinner: Spinner
-    private lateinit var autoUpdateCheck: CheckBox
-    private lateinit var updateStatusText: TextView
     private lateinit var aboutText: TextView
+    private lateinit var resetPanel: LinearLayout
     private var suppressPersist = false
 
     override fun attachBaseContext(newBase: Context) {
@@ -46,9 +44,8 @@ class SettingsActivity : AppCompatActivity() {
         themeSpinner = findViewById(R.id.themeSpinner)
         languageSpinner = findViewById(R.id.languageSpinner)
         cipherSpinner = findViewById(R.id.cipherSpinner)
-        autoUpdateCheck = findViewById(R.id.autoUpdateCheck)
-        updateStatusText = findViewById(R.id.updateStatusText)
         aboutText = findViewById(R.id.aboutText)
+        resetPanel = findViewById(R.id.resetPanel)
 
         findViewById<ImageButton>(R.id.backButton).setOnClickListener { finish() }
 
@@ -81,13 +78,7 @@ class SettingsActivity : AppCompatActivity() {
             ),
         )
 
-        themeSpinner.setSelection(settings.themeMode.ordinal.coerceIn(0, ThemeMode.entries.lastIndex), false)
-        languageSpinner.setSelection(settings.language.ordinal.coerceIn(0, AppLanguage.entries.lastIndex), false)
-        cipherSpinner.setSelection(
-            settings.cipherPreference.ordinal.coerceIn(0, CipherPreference.entries.lastIndex),
-            false,
-        )
-        autoUpdateCheck.isChecked = settings.autoCheckUpdates
+        bindSettingsToUi()
         suppressPersist = false
 
         aboutText.text = getString(R.string.settings_version_format, BuildConfig.VERSION_NAME)
@@ -102,18 +93,29 @@ class SettingsActivity : AppCompatActivity() {
         themeSpinner.onItemSelectedListener = applyListener
         languageSpinner.onItemSelectedListener = applyListener
         cipherSpinner.onItemSelectedListener = applyListener
-        autoUpdateCheck.setOnCheckedChangeListener { _, _ ->
-            if (!suppressPersist) {
-                settings.autoCheckUpdates = autoUpdateCheck.isChecked
-            }
-        }
 
-        findViewById<MaterialButton>(R.id.checkUpdateButton).setOnClickListener {
-            checkUpdates(manual = true)
-        }
         findViewById<MaterialButton>(R.id.openLogButton).setOnClickListener {
             SessionLogActivity.start(this)
         }
+        findViewById<MaterialButton>(R.id.resetSectionButton).setOnClickListener {
+            resetPanel.visibility =
+                if (resetPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        findViewById<MaterialButton>(R.id.fullResetButton).setOnClickListener {
+            confirmFullReset()
+        }
+        findViewById<MaterialButton>(R.id.settingsResetButton).setOnClickListener {
+            confirmSettingsReset()
+        }
+    }
+
+    private fun bindSettingsToUi() {
+        themeSpinner.setSelection(settings.themeMode.ordinal.coerceIn(0, ThemeMode.entries.lastIndex), false)
+        languageSpinner.setSelection(settings.language.ordinal.coerceIn(0, AppLanguage.entries.lastIndex), false)
+        cipherSpinner.setSelection(
+            settings.cipherPreference.ordinal.coerceIn(0, CipherPreference.entries.lastIndex),
+            false,
+        )
     }
 
     override fun onPause() {
@@ -134,7 +136,6 @@ class SettingsActivity : AppCompatActivity() {
         settings.cipherPreference = CipherPreference.entries.getOrElse(
             cipherSpinner.selectedItemPosition,
         ) { CipherPreference.AUTO }
-        settings.autoCheckUpdates = autoUpdateCheck.isChecked
 
         if (settings.themeMode != oldTheme) {
             settings.applyTheme()
@@ -164,56 +165,56 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkUpdates(manual: Boolean) {
-        updateStatusText.text = getString(R.string.update_checking)
-        thread(name = "update-check") {
-            val result = UpdateChecker.check(settings, ignoreDismissed = manual)
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                when (result) {
-                    is UpdateCheckResult.Available ->
-                        showUpdateDialog(result.info.tag, result.info.htmlUrl, result.info.body)
-                    UpdateCheckResult.UpToDate -> {
-                        updateStatusText.text = getString(R.string.update_up_to_date)
-                        if (manual) {
-                            Toast.makeText(this, R.string.update_up_to_date, Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    UpdateCheckResult.Dismissed -> {
-                        updateStatusText.text = getString(R.string.update_dismissed)
-                    }
-                    UpdateCheckResult.RepoNotConfigured -> {
-                        updateStatusText.text = getString(R.string.update_repo_missing)
-                        if (manual) {
-                            Toast.makeText(this, R.string.update_repo_missing, Toast.LENGTH_LONG).show()
-                        }
-                    }
-                    is UpdateCheckResult.Error -> {
-                        updateStatusText.text = getString(R.string.update_error, result.message)
-                    }
-                }
+    private fun confirmFullReset() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.settings_full_reset)
+            .setMessage(R.string.settings_full_reset_confirm)
+            .setPositiveButton(R.string.settings_full_reset) { _, _ ->
+                performFullReset()
             }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun performFullReset() {
+        runCatching { KerioVpnService.stop(this) }
+        SessionLog.clear()
+        val am = getSystemService(ActivityManager::class.java)
+        val cleared = am?.clearApplicationUserData() == true
+        if (!cleared) {
+            // Fallback if the system rejects clearApplicationUserData.
+            AppSettings(this).clearAll()
+            ConnectionPrefs(this).clearAll()
+            cacheDir.deleteRecursively()
+            filesDir.deleteRecursively()
+            finishAffinity()
+            Runtime.getRuntime().exit(0)
         }
     }
 
-    private fun showUpdateDialog(tag: String, url: String, body: String) {
-        if (isFinishing || isDestroyed || tag.isBlank() || url.isBlank()) return
-        updateStatusText.text = getString(R.string.update_available, tag)
+    private fun confirmSettingsReset() {
         AlertDialog.Builder(this)
-            .setTitle(R.string.update_available_title)
-            .setMessage(
-                getString(R.string.update_available_message, tag) +
-                    if (body.isNotBlank()) "\n\n" + body.take(400) else "",
-            )
-            .setPositiveButton(R.string.update_open) { _, _ ->
-                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            .setTitle(R.string.settings_reset_settings)
+            .setMessage(R.string.settings_reset_settings_confirm)
+            .setPositiveButton(R.string.settings_reset_settings) { _, _ ->
+                performSettingsReset()
             }
-            .setNegativeButton(R.string.update_later) { _, _ ->
-                settings.dismissedUpdateTag = tag
-                updateStatusText.text = getString(R.string.update_dismissed)
-            }
-            .setNeutralButton(R.string.cancel, null)
+            .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    private fun performSettingsReset() {
+        val oldLang = settings.language
+        settings.resetToDefaults()
+        settings.applyTheme()
+        suppressPersist = true
+        bindSettingsToUi()
+        suppressPersist = false
+        Toast.makeText(this, R.string.settings_reset_settings_done, Toast.LENGTH_SHORT).show()
+        if (oldLang != settings.language) {
+            AppSettings.notifyLocaleChanged()
+            recreate()
+        }
     }
 
     companion object {

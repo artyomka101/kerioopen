@@ -16,7 +16,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import android.content.pm.ServiceInfo
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import com.openkerio.vpn.MainActivity
 import com.openkerio.vpn.R
 import com.openkerio.vpn.data.AppSettings
@@ -79,7 +81,17 @@ class KerioVpnService : VpnService() {
 
     private fun ensureForegroundStarted(content: String) {
         try {
-            startForeground(NOTIFICATION_ID, buildNotification(content))
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            } else {
+                0
+            }
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                buildNotification(content),
+                type,
+            )
         } catch (t: Throwable) {
             Log.e(TAG, "startForeground failed", t)
         }
@@ -160,8 +172,14 @@ class KerioVpnService : VpnService() {
                                 }
                                 else -> resetUptime()
                             }
-                            publishStatus(status, detail)
-                            updateStatusNotification(status, detail)
+                            // Show Kerio server address (not tunnel IP) when connected.
+                            val statusDetail = if (status == STATUS_CONNECTED) {
+                                config.server.trim().ifBlank { detail }
+                            } else {
+                                detail
+                            }
+                            publishStatus(status, statusDetail)
+                            updateStatusNotification(status, statusDetail)
                             if (status == STATUS_CONNECTED) {
                                 if (!profileSaved) {
                                     profileSaved = true
@@ -240,10 +258,10 @@ class KerioVpnService : VpnService() {
                 }
                 if (!stopping.get() && failure != null && !cancelled) {
                     val err = failure
-                    val msg = if (fatal) {
-                        err.message ?: getString(R.string.status_error)
-                    } else {
-                        friendlyNetworkError(err)
+                    val msg = when {
+                        isAuthError(err) -> getString(R.string.error_invalid_credentials)
+                        fatal -> err.message ?: getString(R.string.status_error)
+                        else -> friendlyNetworkError(err)
                     }
                     publishStatus(STATUS_ERROR, msg)
                     updateNotification(msg)
@@ -408,10 +426,15 @@ class KerioVpnService : VpnService() {
             text.contains("rekey acknowledgment timeout")
     }
 
-    private fun isFatalConfigError(t: Throwable?): Boolean {
+    private fun isAuthError(t: Throwable?): Boolean {
         val text = throwableText(t)
         return text.contains("authentication failed") ||
-            text.contains("username rejected") ||
+            text.contains("username rejected")
+    }
+
+    private fun isFatalConfigError(t: Throwable?): Boolean {
+        val text = throwableText(t)
+        return isAuthError(t) ||
             text.contains("certificate pin") ||
             text.contains("unsupported version") ||
             text.contains("ip config rejected") ||
@@ -451,9 +474,9 @@ class KerioVpnService : VpnService() {
         val raw = t?.message ?: return getString(R.string.status_network_switch)
         val lower = raw.lowercase()
         return when {
+            isServerUnreachableMessage(lower) ->
+                getString(R.string.error_server_unreachable)
             "software caused connection abort" in lower || "connection abort" in lower ->
-                getString(R.string.status_network_switch)
-            "network is unreachable" in lower || "enetunreach" in lower ->
                 getString(R.string.status_network_switch)
             "tls closed by peer" in lower || "control timeout" in lower ->
                 getString(R.string.status_reconnecting)
@@ -476,7 +499,10 @@ class KerioVpnService : VpnService() {
             .setSession("OpenKerio VPN")
             .setMtu(if (mtu > 0) mtu else 1400)
             .addAddress(address, prefixLength)
-            .allowFamily(android.system.OsConstants.AF_INET)
+        // allowFamily is API 29+; on Android 8–9 IPv4-only comes from addAddress/routes.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.allowFamily(android.system.OsConstants.AF_INET)
+        }
 
         val dnsList = dnsServers.filter { it.isNotBlank() && it != "0.0.0.0" }
             .ifEmpty { listOf("1.1.1.1", "8.8.8.8") }
@@ -579,9 +605,11 @@ class KerioVpnService : VpnService() {
             Intent(this, KerioVpnService::class.java).setAction(ACTION_DISCONNECT),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val title = sessionConfig?.displayName?.trim().orEmpty()
+            .ifBlank { getString(R.string.vpn_notification_title) }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(getString(R.string.vpn_notification_title))
+            .setContentTitle(title)
             .setContentText(content)
             .setOngoing(true)
             .setContentIntent(open)
@@ -616,7 +644,9 @@ class KerioVpnService : VpnService() {
                 val uptime = formatUptime(connectedAtMs)
                 val rx = formatRate(lastRxBps)
                 val tx = formatRate(lastTxBps)
-                getString(R.string.vpn_notification_status, uptime, rx, tx)
+                val statusLine = getString(R.string.vpn_notification_status, uptime, rx, tx)
+                val server = sessionConfig?.server?.trim().orEmpty()
+                if (server.isNotBlank()) "$server · $statusLine" else statusLine
             }
             STATUS_CONNECTING -> getString(R.string.vpn_notification_connecting) +
                 if (detail.isNotBlank()) " · $detail" else ""
@@ -693,6 +723,19 @@ class KerioVpnService : VpnService() {
         private const val CHANNEL_ID = "openkerio_vpn"
         private const val NOTIFICATION_ID = 42
         private const val NETWORK_HICCUP_MS = 3_500L
+
+        fun isServerUnreachableMessage(text: String): Boolean {
+            val lower = text.lowercase()
+            return "failed to connect" in lower ||
+                "connection timed out" in lower ||
+                "connect timed out" in lower ||
+                "etimedout" in lower ||
+                "econnrefused" in lower ||
+                "connection refused" in lower ||
+                "no route to host" in lower ||
+                "network is unreachable" in lower ||
+                "enetunreach" in lower
+        }
 
         const val ACTION_CONNECT = "com.openkerio.vpn.CONNECT"
         const val ACTION_DISCONNECT = "com.openkerio.vpn.DISCONNECT"

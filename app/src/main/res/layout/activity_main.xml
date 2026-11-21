@@ -219,24 +219,15 @@
                 android:layout_height="wrap_content"
                 android:text="@string/persistent"
                 android:textColor="@color/ok_ink" />
-
-            <TextView
-                android:id="@+id/fingerprintText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="@string/cert_none"
-                android:textColor="@color/ok_muted"
-                android:textSize="12sp" />
         </LinearLayout>
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/probeButton"
+            android:id="@+id/clearButton"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="@string/check_cert"
+            android:text="@string/clear_form"
             android:textAllCaps="false"
             app:strokeColor="@color/ok_accent" />
 

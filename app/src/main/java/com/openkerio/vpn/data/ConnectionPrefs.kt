@@ -145,6 +145,10 @@ class ConnectionPrefs(context: Context) {
         persistProfiles(listProfiles().filterNot { it.id == id })
     }
 
+    fun clearAll() {
+        prefs.edit().clear().commit()
+    }
+
     private fun persistProfiles(profiles: List<SavedProfile>) {
         val arr = JSONArray()
         profiles.forEach { p ->

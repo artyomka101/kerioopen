@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
@@ -32,18 +31,14 @@ import com.openkerio.vpn.data.ConnectionPrefs
 import com.openkerio.vpn.data.SavedProfile
 import com.openkerio.vpn.data.SessionLog
 import com.openkerio.vpn.ui.SpeedGraphView
-import com.openkerio.vpn.update.UpdateCheckResult
-import com.openkerio.vpn.update.UpdateChecker
 import com.openkerio.vpn.vpn.KerioVpnService
 import com.openkerio.vpn.vpn.NativeEngine
 import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
     private lateinit var prefs: ConnectionPrefs
-    private lateinit var settings: AppSettings
     private lateinit var statusText: TextView
     private lateinit var detailText: TextView
-    private lateinit var fingerprintText: TextView
     private lateinit var errorText: TextView
     private lateinit var rxSpeedText: TextView
     private lateinit var txSpeedText: TextView
@@ -72,7 +67,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var persistentCheck: CheckBox
     private lateinit var connectButton: MaterialButton
     private lateinit var disconnectButton: MaterialButton
-    private lateinit var probeButton: MaterialButton
+    private lateinit var clearButton: MaterialButton
 
     private var busy = false
     private var localeEpochSeen = AppSettings.localeEpoch
@@ -118,7 +113,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        settings = AppSettings(this)
         setContentView(R.layout.activity_main)
         prefs = ConnectionPrefs(this)
         bindViews()
@@ -126,19 +120,17 @@ class MainActivity : AppCompatActivity() {
         loadForm()
         refreshProfiles()
         maybeRequestNotificationPermission()
-        maybeAutoCheckUpdates()
 
         findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
             SettingsActivity.start(this)
         }
-        probeButton.setOnClickListener { probeCertificate() }
+        clearButton.setOnClickListener { clearForm() }
         connectButton.setOnClickListener { requestVpnAndConnect() }
         disconnectButton.setOnClickListener {
             KerioVpnService.stop(this)
             SessionLog.i("disconnect requested by user")
             renderStatus(KerioVpnService.STATUS_DISCONNECTED, "")
         }
-
         val filter = IntentFilter(KerioVpnService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(statusReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -176,7 +168,6 @@ class MainActivity : AppCompatActivity() {
     private fun bindViews() {
         statusText = findViewById(R.id.statusText)
         detailText = findViewById(R.id.detailText)
-        fingerprintText = findViewById(R.id.fingerprintText)
         errorText = findViewById(R.id.errorText)
         rxSpeedText = findViewById(R.id.rxSpeedText)
         txSpeedText = findViewById(R.id.txSpeedText)
@@ -193,7 +184,7 @@ class MainActivity : AppCompatActivity() {
         persistentCheck = findViewById(R.id.persistentCheck)
         connectButton = findViewById(R.id.connectButton)
         disconnectButton = findViewById(R.id.disconnectButton)
-        probeButton = findViewById(R.id.probeButton)
+        clearButton = findViewById(R.id.clearButton)
     }
 
     private fun setupProfilesList() {
@@ -223,11 +214,6 @@ class MainActivity : AppCompatActivity() {
         savePasswordCheck.isChecked = cfg.savePassword
         persistentCheck.isChecked = cfg.persistent
         prefs.save(cfg)
-        fingerprintText.text = if (cfg.trustedFingerprintSha256.isBlank()) {
-            getString(R.string.cert_none)
-        } else {
-            getString(R.string.cert_ok)
-        }
         errorText.text = ""
     }
 
@@ -250,25 +236,40 @@ class MainActivity : AppCompatActivity() {
         passwordInput.setText(cfg.password)
         savePasswordCheck.isChecked = cfg.savePassword
         persistentCheck.isChecked = cfg.persistent
-        fingerprintText.text = if (cfg.trustedFingerprintSha256.isBlank()) {
-            getString(R.string.cert_none)
-        } else {
-            getString(R.string.cert_ok)
-        }
         renderStatus(KerioVpnService.lastStatus, KerioVpnService.lastDetail)
     }
 
     private fun formConfig(): ConnectionConfig {
-        val saved = prefs.load()
+        val server = serverInput.text?.toString()?.trim().orEmpty()
         return ConnectionConfig(
             displayName = nameInput.text?.toString()?.trim().orEmpty(),
-            server = serverInput.text?.toString()?.trim().orEmpty(),
+            server = server,
             username = usernameInput.text?.toString()?.trim().orEmpty(),
             password = passwordInput.text?.toString().orEmpty(),
             savePassword = savePasswordCheck.isChecked,
             persistent = persistentCheck.isChecked,
-            trustedFingerprintSha256 = saved.trustedFingerprintSha256,
+            trustedFingerprintSha256 = fingerprintForServer(server),
         )
+    }
+
+    /** Fingerprint is valid only for the same server it was trusted for. */
+    private fun fingerprintForServer(server: String): String {
+        val normalized = server.trim()
+        if (normalized.isBlank()) return ""
+        val saved = prefs.load()
+        if (
+            normalized.equals(saved.server, ignoreCase = true) &&
+            saved.trustedFingerprintSha256.isNotBlank()
+        ) {
+            return saved.trustedFingerprintSha256
+        }
+        return prefs.listProfiles()
+            .firstOrNull {
+                it.server.equals(normalized, ignoreCase = true) &&
+                    it.trustedFingerprintSha256.isNotBlank()
+            }
+            ?.trustedFingerprintSha256
+            .orEmpty()
     }
 
     private fun persistForm(fingerprintOverride: String? = null) {
@@ -282,61 +283,77 @@ class MainActivity : AppCompatActivity() {
         prefs.save(cfg)
     }
 
-    private fun probeCertificate() {
+    private fun clearForm() {
+        if (busy) return
+        nameInput.setText("")
+        serverInput.setText("")
+        usernameInput.setText("")
+        passwordInput.setText("")
+        savePasswordCheck.isChecked = true
+        persistentCheck.isChecked = false
+        errorText.text = ""
+        prefs.save(ConnectionConfig())
+        SessionLog.i("form cleared")
+    }
+
+    /** Probe server certificate, trust it, then connect without an extra confirmation step. */
+    private fun probeCertificateAndConnect() {
         if (busy) return
         val (host, port) = KerioVpnService.parseServer(serverInput.text?.toString().orEmpty())
         if (host.isBlank()) {
-            errorText.text = getString(R.string.hint_server)
+            errorText.text = getString(R.string.error_invalid_credentials)
             return
         }
         busy = true
         errorText.text = ""
-        detailText.text = getString(R.string.check_cert)
+        detailText.text = getString(R.string.checking_cert)
+        renderStatus(KerioVpnService.STATUS_CONNECTING, getString(R.string.checking_cert))
         thread(name = "probe-cert") {
             try {
                 val fp = NativeEngine.probeCertificate(host, port).lowercase()
                 runOnUiThread {
                     busy = false
                     if (isFinishing || isDestroyed) return@runOnUiThread
-                    AlertDialog.Builder(this)
-                        .setTitle(R.string.check_cert)
-                        .setMessage(getString(R.string.cert_trust_message, fp))
-                        .setPositiveButton(R.string.ok) { _, _ ->
-                            prefs.saveTrustedFingerprint(fp)
-                            fingerprintText.text = getString(R.string.cert_ok)
-                            persistForm(fingerprintOverride = fp)
-                            SessionLog.i("certificate trusted for $host")
-                        }
-                        .setNegativeButton(R.string.cancel, null)
-                        .setOnDismissListener {
-                            renderStatus(KerioVpnService.lastStatus, KerioVpnService.lastDetail)
-                        }
-                        .show()
+                    prefs.saveTrustedFingerprint(fp)
+                    persistForm(fingerprintOverride = fp)
+                    SessionLog.i("certificate auto-trusted for $host")
+                    launchVpnPermissionOrStart()
                 }
             } catch (t: Throwable) {
                 runOnUiThread {
                     busy = false
                     if (isFinishing || isDestroyed) return@runOnUiThread
-                    errorText.text = t.message ?: getString(R.string.status_error)
+                    val raw = t.message.orEmpty()
+                    val msg = when {
+                        KerioVpnService.isServerUnreachableMessage(raw) ->
+                            getString(R.string.error_server_unreachable)
+                        raw.isNotBlank() -> raw
+                        else -> getString(R.string.cert_check_failed)
+                    }
                     SessionLog.e("cert probe failed: ${t.message}")
-                    renderStatus(KerioVpnService.lastStatus, KerioVpnService.lastDetail)
+                    renderStatus(KerioVpnService.STATUS_ERROR, msg)
                 }
             }
         }
     }
 
     private fun requestVpnAndConnect() {
+        if (busy) return
         val cfg = formConfig()
-        persistForm()
-        if (cfg.trustedFingerprintSha256.isBlank()) {
-            errorText.text = getString(R.string.cert_none)
-            return
-        }
         if (cfg.server.isBlank() || cfg.username.isBlank() || cfg.password.isBlank()) {
-            errorText.text = getString(R.string.status_error)
+            errorText.text = getString(R.string.error_invalid_credentials)
             return
         }
         errorText.text = ""
+        if (cfg.trustedFingerprintSha256.isBlank()) {
+            probeCertificateAndConnect()
+            return
+        }
+        persistForm()
+        launchVpnPermissionOrStart()
+    }
+
+    private fun launchVpnPermissionOrStart() {
         val prepare = VpnService.prepare(this)
         if (prepare != null) {
             vpnPermission.launch(prepare)
@@ -348,7 +365,11 @@ class MainActivity : AppCompatActivity() {
     private fun startVpn() {
         val cfg = formConfig()
         if (cfg.server.isBlank() || cfg.username.isBlank() || cfg.password.isBlank()) {
-            errorText.text = getString(R.string.status_error)
+            errorText.text = getString(R.string.error_invalid_credentials)
+            return
+        }
+        if (cfg.trustedFingerprintSha256.isBlank()) {
+            errorText.text = getString(R.string.cert_check_failed)
             return
         }
         persistForm()
@@ -372,14 +393,9 @@ class MainActivity : AppCompatActivity() {
             KerioVpnService.STATUS_ERROR -> getString(R.string.status_error)
             else -> getString(R.string.status_disconnected)
         }
-        detailText.text = if (
-            status == KerioVpnService.STATUS_CONNECTED &&
-            lastWireVersion > 0 &&
-            lastCipher.isNotBlank()
-        ) {
-            getString(R.string.session_info_format, detail.ifBlank { "—" }, lastWireVersion, lastCipher)
-        } else {
-            detail
+        detailText.text = when {
+            status == KerioVpnService.STATUS_ERROR -> ""
+            else -> detail
         }
         when (status) {
             KerioVpnService.STATUS_ERROR -> errorText.text = detail
@@ -420,7 +436,7 @@ class MainActivity : AppCompatActivity() {
             status == KerioVpnService.STATUS_RECONNECTING
         connectButton.isEnabled = !connected && !connecting && !busy
         disconnectButton.isEnabled = connected || connecting
-        probeButton.isEnabled = !connected && !connecting && !busy
+        clearButton.isEnabled = !connected && !connecting && !busy
         nameInput.isEnabled = !connected && !connecting
         serverInput.isEnabled = !connected && !connecting
         usernameInput.isEnabled = !connected && !connecting
@@ -457,29 +473,6 @@ class MainActivity : AppCompatActivity() {
         ) == PackageManager.PERMISSION_GRANTED
         if (!granted) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-    }
-
-    private fun maybeAutoCheckUpdates() {
-        if (!UpdateChecker.shouldAutoCheck(settings)) return
-        thread(name = "auto-update") {
-            when (val result = UpdateChecker.check(settings, ignoreDismissed = false)) {
-                is UpdateCheckResult.Available -> runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    AlertDialog.Builder(this)
-                        .setTitle(R.string.update_available_title)
-                        .setMessage(getString(R.string.update_available_message, result.info.tag))
-                        .setPositiveButton(R.string.update_open) { _, _ ->
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(result.info.htmlUrl)))
-                        }
-                        .setNegativeButton(R.string.update_later) { _, _ ->
-                            settings.dismissedUpdateTag = result.info.tag
-                        }
-                        .setNeutralButton(R.string.cancel, null)
-                        .show()
-                }
-                else -> Unit
-            }
         }
     }
 
